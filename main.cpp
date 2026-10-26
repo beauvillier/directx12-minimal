@@ -45,8 +45,9 @@ public:
         if (window) DestroyWindow(window);
     }
 
-    void Initialize(HINSTANCE instance, bool warp);
+    void Initialize(HINSTANCE instance, bool warp, bool smoke);
     void Render(float angle);
+    void VerifyPixels();
     void WaitForGpu() {
         if (!gpuPending) return;
         const UINT64 value = ++fenceValue;
@@ -73,6 +74,7 @@ private:
     ComPtr<IDXGISwapChain3> swapChain;
     ComPtr<ID3D12DescriptorHeap> rtvHeap;
     ComPtr<ID3D12Resource> targets[BufferCount];
+    ComPtr<ID3D12Resource> readback;
     ComPtr<ID3D12CommandAllocator> allocator;
     ComPtr<ID3D12GraphicsCommandList> commands;
     ComPtr<ID3D12RootSignature> rootSignature;
@@ -105,23 +107,25 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
     return DefWindowProcW(window, message, wparam, lparam);
 }
 
-void Demo::Initialize(HINSTANCE instance, bool warp) {
-    WNDCLASSW windowClass = {};
-    windowClass.lpfnWndProc = WindowProc;
-    windowClass.hInstance = instance;
-    windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    windowClass.lpszClassName = L"MinimalDirectX12";
-    if (!RegisterClassW(&windowClass))
-        Check(HRESULT_FROM_WIN32(GetLastError()), "Register window class");
-    const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-    RECT rect = {0, 0, static_cast<LONG>(Width), static_cast<LONG>(Height)};
-    if (!AdjustWindowRect(&rect, style, FALSE))
-        Check(HRESULT_FROM_WIN32(GetLastError()), "Adjust window rectangle");
-    window = CreateWindowExW(0, windowClass.lpszClassName, L"Minimal Direct3D 12",
-                            style, CW_USEDEFAULT, CW_USEDEFAULT,
-                            rect.right - rect.left, rect.bottom - rect.top,
-                            nullptr, nullptr, instance, this);
-    if (!window) Check(HRESULT_FROM_WIN32(GetLastError()), "Create window");
+void Demo::Initialize(HINSTANCE instance, bool warp, bool smoke) {
+    if (!smoke) {
+        WNDCLASSW windowClass = {};
+        windowClass.lpfnWndProc = WindowProc;
+        windowClass.hInstance = instance;
+        windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        windowClass.lpszClassName = L"MinimalDirectX12";
+        if (!RegisterClassW(&windowClass))
+            Check(HRESULT_FROM_WIN32(GetLastError()), "Register window class");
+        const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+        RECT rect = {0, 0, static_cast<LONG>(Width), static_cast<LONG>(Height)};
+        if (!AdjustWindowRect(&rect, style, FALSE))
+            Check(HRESULT_FROM_WIN32(GetLastError()), "Adjust window rectangle");
+        window = CreateWindowExW(0, windowClass.lpszClassName, L"Minimal Direct3D 12",
+                                style, CW_USEDEFAULT, CW_USEDEFAULT,
+                                rect.right - rect.left, rect.bottom - rect.top,
+                                nullptr, nullptr, instance, this);
+        if (!window) Check(HRESULT_FROM_WIN32(GetLastError()), "Create window");
+    }
 
 #ifdef _DEBUG
     ComPtr<ID3D12Debug> debug;
@@ -147,22 +151,41 @@ void Demo::Initialize(HINSTANCE instance, bool warp) {
     swapDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     swapDesc.BufferCount = BufferCount;
     swapDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    ComPtr<IDXGISwapChain1> initialSwapChain;
-    Check(factory->CreateSwapChainForHwnd(queue.Get(), window, &swapDesc, nullptr,
-          nullptr, &initialSwapChain), "Create swap chain");
-    Check(initialSwapChain.As(&swapChain), "Get swap chain interface");
-    Check(factory->MakeWindowAssociation(window, DXGI_MWA_NO_ALT_ENTER),
-          "Disable fullscreen shortcut");
+    if (!smoke) {
+        ComPtr<IDXGISwapChain1> initialSwapChain;
+        Check(factory->CreateSwapChainForHwnd(queue.Get(), window, &swapDesc, nullptr,
+              nullptr, &initialSwapChain), "Create swap chain");
+        Check(initialSwapChain.As(&swapChain), "Get swap chain interface");
+        Check(factory->MakeWindowAssociation(window, DXGI_MWA_NO_ALT_ENTER),
+              "Disable fullscreen shortcut");
+    }
 
     D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
     heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-    heapDesc.NumDescriptors = BufferCount;
+    heapDesc.NumDescriptors = smoke ? 1 : BufferCount;
     Check(device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&rtvHeap)),
           "Create render target descriptor heap");
     rtvStride = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
     auto handle = rtvHeap->GetCPUDescriptorHandleForHeapStart();
-    for (UINT i = 0; i < BufferCount; ++i) {
-        Check(swapChain->GetBuffer(i, IID_PPV_ARGS(&targets[i])), "Get back buffer");
+    for (UINT i = 0; i < heapDesc.NumDescriptors; ++i) {
+        if (smoke) {
+            D3D12_HEAP_PROPERTIES heap = {};
+            heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+            heap.CreationNodeMask = heap.VisibleNodeMask = 1;
+            D3D12_RESOURCE_DESC texture = {};
+            texture.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+            texture.Width = Width;
+            texture.Height = Height;
+            texture.DepthOrArraySize = texture.MipLevels = 1;
+            texture.Format = swapDesc.Format;
+            texture.SampleDesc.Count = 1;
+            texture.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+            Check(device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &texture,
+                  D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&targets[i])),
+                  "Create offscreen render target");
+        } else {
+            Check(swapChain->GetBuffer(i, IID_PPV_ARGS(&targets[i])), "Get back buffer");
+        }
         device->CreateRenderTargetView(targets[i].Get(), nullptr, handle);
         handle.ptr += rtvStride;
     }
@@ -238,14 +261,14 @@ float4 PSMain(Vertex v) : SV_Target { return float4(v.color, 1); }
     Check(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)), "Create fence");
     fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     if (!fenceEvent) Check(HRESULT_FROM_WIN32(GetLastError()), "Create fence event");
-    ShowWindow(window, SW_SHOW);
+    if (window) ShowWindow(window, SW_SHOW);
 }
 
 void Demo::Render(float angle) {
     WaitForGpu();
     Check(allocator->Reset(), "Reset command allocator");
     Check(commands->Reset(allocator.Get(), pipeline.Get()), "Reset command list");
-    const UINT index = swapChain->GetCurrentBackBufferIndex();
+    const UINT index = swapChain ? swapChain->GetCurrentBackBufferIndex() : 0;
     D3D12_RESOURCE_BARRIER barrier = {};
     barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
     barrier.Transition.pResource = targets[index].Get();
@@ -274,10 +297,73 @@ void Demo::Render(float angle) {
     ID3D12CommandList* lists[] = {commands.Get()};
     gpuPending = true;
     queue->ExecuteCommandLists(1, lists);
-    const HRESULT result = swapChain->Present(1, 0);
+    const HRESULT result = swapChain ? swapChain->Present(1, 0) : S_OK;
     Check(result, "Present frame");
     WaitForGpu(); // Deliberately serialize frames: one allocator, no in-flight reuse.
     if (result == DXGI_STATUS_OCCLUDED) Sleep(50);
+}
+
+void Demo::VerifyPixels() {
+    WaitForGpu();
+    const auto texture = targets[0]->GetDesc();
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
+    UINT64 size = 0;
+    device->GetCopyableFootprints(&texture, 0, 1, 0, &footprint, nullptr, nullptr, &size);
+    D3D12_HEAP_PROPERTIES heap = {};
+    heap.Type = D3D12_HEAP_TYPE_READBACK;
+    heap.CreationNodeMask = heap.VisibleNodeMask = 1;
+    D3D12_RESOURCE_DESC buffer = {};
+    buffer.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    buffer.Width = size;
+    buffer.Height = buffer.DepthOrArraySize = buffer.MipLevels = 1;
+    buffer.SampleDesc.Count = 1;
+    buffer.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    Check(device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &buffer,
+          D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&readback)),
+          "Create pixel readback buffer");
+    Check(allocator->Reset(), "Reset readback allocator");
+    Check(commands->Reset(allocator.Get(), nullptr), "Reset readback command list");
+    D3D12_RESOURCE_BARRIER barrier = {};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource = targets[0].Get();
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    // COMMON and PRESENT both have value zero; offscreen frames return to COMMON.
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    commands->ResourceBarrier(1, &barrier);
+    D3D12_TEXTURE_COPY_LOCATION source = {}, destination = {};
+    source.pResource = targets[0].Get();
+    source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    destination.pResource = readback.Get();
+    destination.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    destination.PlacedFootprint = footprint;
+    commands->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
+    commands->ResourceBarrier(1, &barrier);
+    Check(commands->Close(), "Close readback command list");
+    ID3D12CommandList* lists[] = {commands.Get()};
+    gpuPending = true;
+    queue->ExecuteCommandLists(1, lists);
+    WaitForGpu();
+    void* mapped = nullptr;
+    const D3D12_RANGE range = {0, static_cast<SIZE_T>(size)};
+    Check(readback->Map(0, &range, &mapped), "Map pixel readback");
+    const auto* corner = static_cast<const unsigned char*>(mapped) + footprint.Offset;
+    const auto* centre = corner + (Height / 2) * footprint.Footprint.RowPitch + (Width / 2) * 4;
+    const int navy[] = {4, 6, 18, 255}; // RGBA8 quantization of the clear colour.
+    bool background = true, triangle = false;
+    for (UINT channel = 0; channel < 4; ++channel) {
+        const int delta = int(corner[channel]) - navy[channel];
+        background = background && delta >= -1 && delta <= 1;
+        if (channel < 3 && int(centre[channel]) > navy[channel] + 32) triangle = true;
+    }
+    triangle = triangle && centre[3] == 255;
+    const D3D12_RANGE written = {0, 0};
+    readback->Unmap(0, &written);
+    if (!background || !triangle)
+        throw std::runtime_error("Smoke test pixel verification failed: expected navy corner and coloured centre.");
+    Report("Smoke test passed: 8 offscreen frames; navy corner and triangle centre verified by GPU readback.");
 }
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int) {
@@ -291,13 +377,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int) {
             else throw std::runtime_error("Unknown argument. Use --warp and/or --smoke-test.");
         }
         // Keep the client area in physical pixels, including on scaled desktops.
-        if (!SetProcessDPIAware())
+        if (!smoke && !SetProcessDPIAware())
             Check(HRESULT_FROM_WIN32(GetLastError()), "Set process DPI awareness");
         Demo demo;
-        demo.Initialize(instance, warp);
+        demo.Initialize(instance, warp, smoke);
+        if (smoke) {
+            for (unsigned frame = 0; frame < 8; ++frame)
+                demo.Render(float(frame) * 0.125f);
+            demo.VerifyPixels();
+            return 0;
+        }
         auto previous = std::chrono::steady_clock::now();
         float angle = 0;
-        unsigned frames = 0;
         while (!demo.quit) {
             MSG message;
             while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
@@ -317,11 +408,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int) {
                 angle += std::chrono::duration<float>(now - previous).count();
             previous = now;
             demo.Render(angle);
-            if (smoke && ++frames == 8) break;
         }
         demo.WaitForGpu();
-        if (smoke && frames != 8)
-            throw std::runtime_error("Smoke test interrupted before eight frames completed.");
         return 0;
     } catch (const std::exception& error) {
         Report(error.what());

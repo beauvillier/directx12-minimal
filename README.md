@@ -40,9 +40,14 @@ The client area is fixed at 960x640 physical pixels; resizing, maximizing,
 and Alt+Enter fullscreen are disabled. Minimized windows wait for messages;
 occluded presentation is throttled.
 
-`--smoke-test` completes eight rendered/presented frames, waits for the GPU,
-then exits 0. Initialization, shader, rendering, wait errors, unknown arguments,
-or an interrupted smoke test exit nonzero. Combine it with `--warp` as above.
+`--smoke-test` renders eight deterministic frames to an offscreen GPU texture,
+using the same shaders, pipeline, and draw commands as the windowed renderer.
+It creates no window or swap chain, so it can run in a noninteractive Windows
+SSH/service session. After a GPU fence, it reads back the final frame and checks
+for a navy corner and a visibly coloured centre, respecting the texture's row
+pitch. Success is reported on stderr and exits 0; initialization, shader,
+rendering, wait, pixel verification errors, or unknown arguments exit nonzero.
+Combine it with `--warp` as above.
 There are no error dialogs, including in smoke mode. Failures include the
 operation and HRESULT, with compiler diagnostics where available, on stderr
 and `OutputDebugString` (visible in Visual Studio's Output window).
@@ -79,9 +84,12 @@ the program records commands for a GPU:
 
 ## Verification status
 
-This implementation was authored on Linux. Windows/MSVC compilation,
-WARP smoke execution, and visual/interaction verification are pending
-parent-owned Windows checks; source inspection is not runtime verification.
+This implementation was authored on Linux. Initial Windows Debug and Release
+builds passed, but swap-chain creation failed in the SSH/service session.
+Final Windows builds and offscreen GPU pixel verification are pending
+parent-owned checks. GUI rendering and interaction remain unverified because
+the GUI session is disconnected; headless smoke does not verify presentation
+or controls. Source inspection is not runtime verification.
 
 ## License
 
