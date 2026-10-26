@@ -7,9 +7,10 @@ WRL `ComPtr`, the HLSL compiler, and Direct3D headers come with the Windows SDK.
 
 ## Build and run
 
-Use Windows 10/11 x64 with Visual Studio 2022 and the **Desktop development
-with C++** workload, including MSVC v143 x64/x86 tools and a current Windows
-10 or Windows 11 SDK. Hardware rendering needs a Direct3D 12 driver supporting
+Use Windows 10/11 x64 with Visual Studio 2022 or Visual Studio 2026 and the
+**Desktop development with C++** workload, including the default installed MSVC
+x64/x86 tools and a current Windows 10 or Windows 11 SDK.
+Hardware rendering needs a Direct3D 12 driver supporting
 feature level 11_0. `--warp` selects Windows' software adapter, useful in VMs
 and on machines without suitable GPU support.
 
@@ -28,11 +29,21 @@ echo %errorlevel%
 
 `build.cmd` locates MSBuild with the installed `vswhere`, then tries standard
 Visual Studio 2022/2019 install paths. It propagates build failures. It does
-not install anything. The default toolset is v143; select an installed
-alternative with `build.cmd Release v142`, or invoke MSBuild directly:
+not install anything. The project uses MSBuild's installed
+`$(DefaultPlatformToolset)` by default: v143 for Visual Studio 2022 or v145 for
+Visual Studio 2026. Select an installed alternative with
+`build.cmd Release v145`, or override it with MSBuild directly:
 
 ```bat
 MSBuild minimal-directx12.vcxproj /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143
+```
+
+Alternatively, compile the single file from an **x64 Native Tools Command
+Prompt** (Developer Command Prompt configured for x64), with no external
+dependencies:
+
+```bat
+cl /std:c++17 /EHsc main.cpp /Fe:minimal-directx12.exe /link /SUBSYSTEM:WINDOWS d3d12.lib dxgi.lib d3dcompiler.lib user32.lib
 ```
 
 **Space** pauses/resumes rotation; **Escape** or the close button exits.
@@ -84,12 +95,16 @@ the program records commands for a GPU:
 
 ## Verification status
 
-This implementation was authored on Linux. Initial Windows Debug and Release
-builds passed, but swap-chain creation failed in the SSH/service session.
-Final Windows builds and offscreen GPU pixel verification are pending
-parent-owned checks. GUI rendering and interaction remain unverified because
-the GUI session is disconnected; headless smoke does not verify presentation
-or controls. Source inspection is not runtime verification.
+Verified on real Windows 11 with Visual Studio 2026, MSVC v143 and v145, and
+Windows SDK 10.0.26100.0. Debug and Release v143 builds each completed with zero
+warnings and errors; v145 builds also succeeded, but v145 runtime testing is
+not yet complete. Default-adapter and WARP headless smoke tests passed in both
+v143 configurations with GPU readback. An invalid argument exited 1. A separate
+no-draw mutation built in Release and correctly failed the pixel test with
+exit 1.
+
+The interactive window could not be visually verified because our desktop
+session was disconnected. Headless smoke does not verify presentation or controls.
 
 ## License
 
