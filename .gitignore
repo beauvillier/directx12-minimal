@@ -1,0 +1,9 @@
+/build/
+/.vs/
+*.user
+*.suo
+DESIGN.md
+LABJOURNAL.md
+REVIEW.md
+*BRIEF.md
+*.log
