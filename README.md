@@ -43,7 +43,7 @@ Prompt** (Developer Command Prompt configured for x64), with no external
 dependencies:
 
 ```bat
-cl /std:c++17 /EHsc main.cpp /Fe:minimal-directx12.exe /link /SUBSYSTEM:WINDOWS d3d12.lib dxgi.lib d3dcompiler.lib user32.lib
+cl /std:c++17 /EHsc /DUNICODE /D_UNICODE main.cpp /Fe:minimal-directx12.exe /link /SUBSYSTEM:WINDOWS d3d12.lib dxgi.lib d3dcompiler.lib user32.lib
 ```
 
 **Space** pauses/resumes rotation; **Escape** or the close button exits.
@@ -95,13 +95,14 @@ the program records commands for a GPU:
 
 ## Verification status
 
-Verified on real Windows 11 with Visual Studio 2026, MSVC v143 and v145, and
-Windows SDK 10.0.26100.0. Debug and Release v143 builds each completed with zero
-warnings and errors; v145 builds also succeeded, but v145 runtime testing is
-not yet complete. Default-adapter and WARP headless smoke tests passed in both
-v143 configurations with GPU readback. An invalid argument exited 1. A separate
-no-draw mutation built in Release and correctly failed the pixel test with
-exit 1.
+Verified on Windows 11 with Visual Studio 2026, MSVC v143 and v145, and
+Windows SDK 10.0.26100.0. Debug and Release builds with both toolsets completed
+with zero warnings and errors. Default-adapter and WARP headless smoke tests
+passed in all four toolset/configuration combinations with GPU readback. The
+project also builds with its automatically selected toolset, and the standalone
+`cl` command above was compiled and its WARP smoke test passed. Invalid arguments
+exit 1. A separate no-draw mutation built in Release and correctly failed the
+pixel test with exit 1.
 
 The interactive window could not be visually verified because our desktop
 session was disconnected. Headless smoke does not verify presentation or controls.

@@ -2,6 +2,11 @@
 /.vs/
 *.user
 *.suo
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.idb
 DESIGN.md
 LABJOURNAL.md
 REVIEW.md
